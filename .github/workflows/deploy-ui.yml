@@ -1,0 +1,122 @@
+name: Deploy Job Tracker UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ui-next/**'
+      - '.github/workflows/deploy-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: job-tracker-ui
+  API_URL: http://13.126.202.171:8008
+
+jobs:
+  # ─── PHASE 1: TEST ────────────────────────────────
+  test:
+    name: Lint + Test + Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui-next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui-next/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  # ─── PHASE 2: BUILD + PUSH TO ECR ─────────────────
+  build:
+    name: Build → ECR
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        id: build
+        run: |
+          IMAGE="${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ env.API_URL }} \
+            -t $IMAGE ui-next/
+          docker tag $IMAGE ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Push to ECR
+        run: |
+          docker push ${{ steps.build.outputs.image }}
+          docker push ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+  # ─── PHASE 3: DEPLOY TO EC2 ───────────────────────
+  deploy:
+    name: Deploy → EC2
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Login to ECR
+            aws ecr get-login-password --region ap-south-1 | \
+              docker login --username AWS --password-stdin \
+              ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
+            
+            # Pull latest secrets
+            aws secretsmanager get-secret-value \
+              --secret-id job-tracker/ui \
+              --region ap-south-1 \
+              --query SecretString \
+              --output text | python3 -c "
+            import json, sys
+            for k, v in json.load(sys.stdin).items():
+                print(f'{k}={v}')
+            " > /home/ec2-user/apps/job-tracker-ui.env
+
+
+            # Stop and remove old container
+            docker stop job-tracker-ui || true
+            docker rm job-tracker-ui || true
+
+            # Pull and run new container
+            docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/job-tracker-ui:latest
+
+            docker run -d \
+              --name job-tracker-ui \
+              --restart unless-stopped \
+              -p 3002:3000 \
+              ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/job-tracker-ui:latest
+
+            docker image prune -f
+            echo "Job Tracker UI deployed: ${{ github.sha }}"
