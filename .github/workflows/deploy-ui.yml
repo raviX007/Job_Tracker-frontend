@@ -15,7 +15,7 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: job-tracker-ui
-  API_URL: http://13.126.202.171:8008
+  API_URL: https://job-app.duckdns.org/
 
 jobs:
   # ─── PHASE 1: TEST ────────────────────────────────

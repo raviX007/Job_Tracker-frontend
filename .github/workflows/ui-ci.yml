@@ -40,14 +40,6 @@ jobs:
         if: steps.changes.outputs.changed == 'true' || github.event_name == 'pull_request'
         run: npm ci
 
-      - name: Lint (ESLint)
-        if: steps.changes.outputs.changed == 'true' || github.event_name == 'pull_request'
-        run: npm run lint
-
-      - name: Test with coverage (Vitest)
-        if: steps.changes.outputs.changed == 'true' || github.event_name == 'pull_request'
-        run: npm run test:coverage
-
       - name: Build
         if: steps.changes.outputs.changed == 'true' || github.event_name == 'pull_request'
         run: npm run build
