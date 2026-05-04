@@ -15,7 +15,7 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: job-tracker-ui
-  API_URL: https://job-app.duckdns.org
+  API_URL: https://job-tracker.ravi-raj.dev
 
 jobs:
   # ─── PHASE 1: TEST ────────────────────────────────
