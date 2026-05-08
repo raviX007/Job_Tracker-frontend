@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'ui-next/**'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - 'Dockerfile'
       - '.github/workflows/deploy-ui.yml'
   workflow_dispatch:
 
@@ -22,16 +27,13 @@ jobs:
   test:
     name: Lint + Test + Build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ui-next
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: ui-next/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run build
@@ -61,7 +63,7 @@ jobs:
           IMAGE="${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ env.API_URL }} \
-            -t $IMAGE ui-next/
+            -t $IMAGE .
           docker tag $IMAGE ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
